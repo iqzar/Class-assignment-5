@@ -2,9 +2,12 @@ import streamlit as st
 import hashlib
 import json
 import os
-import bcrypt
-from cryptography.fernet import Fernet
 import time
+import base64
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 
 # ------------------------ 🔑 Load or Generate Persistent Key ------------------------
 KEY_FILE = "secret.key"
@@ -60,13 +63,35 @@ def save_data(file_path, data):
 stored_data = load_data(DATA_FILE)
 users_data = load_data(USER_FILE)
 
-# Hash password
+# --- Updated cryptography-based password hashing ---
 def hash_passkey(passkey):
-    return hashlib.pbkdf2_hmac('sha256', passkey.encode(), b'salt', 100000).hex()
+    salt = os.urandom(16)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    key = kdf.derive(passkey.encode())
+    return base64.b64encode(salt + key).decode('utf-8')
 
-# Check password
 def check_passkey(stored_hash, passkey):
-    return stored_hash == hashlib.pbkdf2_hmac('sha256', passkey.encode(), b'salt', 100000).hex()
+    try:
+        decoded = base64.b64decode(stored_hash.encode('utf-8'))
+        salt = decoded[:16]
+        stored_key = decoded[16:]
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        kdf.verify(passkey.encode(), stored_key)
+        return True
+    except Exception:
+        return False
 
 # Encrypt
 def encrypt_data(text, passkey):
